@@ -46,7 +46,7 @@ async function run() {
     })
     //middle ware for token verification
     const verifyToken = (req, res, next) => {
-      console.log('inside verify token', req.headers.authorization);
+      // console.log('inside verify token', req.headers.authorization);
       //must use same name set to client side ig authorization
       if (!req.headers.authorization) {
         return res.status(401).send({ message: 'unauthorized access' });
@@ -78,10 +78,10 @@ async function run() {
       }
       next();
     }
-/*
-Notes:
-verifyToken, verifyAdmin secures the api not the client side routes so routes should be implemented in client side
-*/
+    /*
+    Notes:
+    verifyToken, verifyAdmin secures the api not the client side routes so routes should be implemented in client side
+    */
     //user related api for handling role used in signup
     app.get('/users', verifyToken, verifyAdmin, async (req, res) => { //two step verification || users must have token also need to be admin
       console.log(req.headers);
@@ -139,6 +139,21 @@ verifyToken, verifyAdmin secures the api not the client side routes so routes sh
       const result = await menuCollection.find().toArray();
       res.send(result);
     })
+    //post with image file type
+    app.post('/menu', verifyToken, verifyAdmin, async (req, res) => { //verification added bz only admin can add food items
+      const item = req.body;
+      const result = await menuCollection.insertOne(item);
+      res.send(result);
+    })
+    app.delete('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
+      const result = await menuCollection.deleteOne(query);
+      res.send(result);
+    })
+
+    //do update menu
+
     app.get('/reviews', async (req, res) => {
       const result = await reviewCollection.find().toArray();
       res.send(result);
