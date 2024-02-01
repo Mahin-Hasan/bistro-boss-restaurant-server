@@ -5,6 +5,14 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const formData = require('form-data');
+const Mailgun = require('mailgun.js');
+const mailgun = new Mailgun(formData);
+const mg = mailgun.client({
+  username: 'api',
+  key: process.env.MAIL_GUN_API_KEY,
+});
+
 const port = process.env.PORT || 5000;
 
 //middleware
@@ -91,7 +99,7 @@ async function run() {
       res.send(result);
     })
 
-    app.get('/users/admin/:email', verifyToken, async (req, res) => {
+    app.get('/users/admin/:email', verifyToken, async (req, res) => { // admin verify
       const email = req.params.email;
       if (email !== req.decoded.email) {//decoded is set in jwt verify token and email is set in client side auth provider unSubscribe || my token my email check
         return res.status(403).send({ message: 'forbidden access' })
@@ -117,7 +125,7 @@ async function run() {
       res.send(result);
     })
 
-    app.patch('/users/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
+    app.patch('/users/admin/:id', verifyToken, verifyAdmin, async (req, res) => { //used in  user Home || patch for adding something to the current data || put to uodate all data || upsert true == update or insert
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const updatedDoc = {
@@ -184,7 +192,7 @@ async function run() {
     })
 
     //cart collection
-    app.get('/carts', async (req, res) => {
+    app.get('/carts', async (req, res) => {// triggered from useCart 
       const email = req.query.email;
       const query = { email: email };
       const result = await cartCollection.find(query).toArray();
@@ -244,7 +252,106 @@ async function run() {
 
       const deleteResult = await cartCollection.deleteMany(query);
 
+      //send user email with payment confirmation
+      mg.messages
+        .create(process.env.MAIL_SENDING_DOMAIN, {
+          from: "Mailgun Sandbox <postmaster@sandboxcd2503716ff04bce8c451c8c466fb161.mailgun.org>",
+          to: ["mahinmtrs@gmail.com"],
+          subject: "bistro boss order confirmation",
+          text: "Testing some Mailgun awesomness!",
+          html: `
+          <div>
+            <h2>Thank you for your order</h2>
+            <h2>Your Transaction Id: <strong>${payment.transactionId}</strong></h2>
+          </div>
+          `
+        })
+        .then(msg => console.log(msg)) // logs response data
+        .catch(err => console.log(err)); // logs any error`;
+
+
       res.send({ paymentResult, deleteResult });
+    })
+
+    //custom dashboard info
+    // stats or analytics
+    app.get('/admin-stats', verifyToken, verifyAdmin, async (req, res) => {
+      const users = await userCollection.estimatedDocumentCount();
+      const menuItems = await menuCollection.estimatedDocumentCount();
+      const orders = await paymentCollection.estimatedDocumentCount();
+
+      // this is not the best way
+      const payments = await paymentCollection.find().toArray();
+      const revenue = payments.reduce((total, payment) => total + payment.price, 0);
+
+      // const result = await paymentCollection.aggregate([
+      //   {
+      //     $group: {
+      //       _id: null,
+      //       totalRevenue: {
+      //         $sum: '$price'
+      //       }
+      //     }
+      //   }
+      // ]).toArray();
+
+      // const revenue = result.length > 0 ? result[0].totalRevenue : 0;
+
+      res.send({
+        users,
+        menuItems,
+        orders,
+        revenue
+      })
+    })
+
+
+    // order status
+    /**
+     * ----------------------------
+     *    NON-Efficient Way
+     * ------------------------------
+     * 1. load all the payments
+     * 2. for every menuItemIds (which is an array), go find the item from menu collection
+     * 3. for every item in the menu collection that you found from a payment entry (document)
+    */
+
+    // using aggregate pipeline
+    app.get('/order-stats', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await paymentCollection.aggregate([
+        {
+          $unwind: '$menuItemIds'
+        },
+        {
+          $lookup: {
+            from: 'menu',
+            localField: 'menuItemIds',
+            foreignField: '_id',
+            as: 'menuItems'
+          }
+        },
+        {
+          $unwind: '$menuItems'
+        },
+        {
+          $group: {
+            _id: '$menuItems.category',
+            quantity: { $sum: 1 },
+            revenue: { $sum: '$menuItems.price' }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            category: '$_id',
+            quantity: '$quantity',
+            revenue: '$revenue'
+          }
+        }
+      ]).toArray();
+
+      res.send(result);
+
     })
 
     // Send a ping to confirm a successful connection
